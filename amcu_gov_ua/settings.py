@@ -92,3 +92,8 @@ TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_EXPORT_ENCODING = "utf-8"
 
 HTTPERROR_ALLOWED_CODES = [404, 500]
+
+DOWNLOAD_HANDLERS = {
+    "http": "scrapy_impersonate.ImpersonateDownloadHandler",
+    "https": "scrapy_impersonate.ImpersonateDownloadHandler",
+}
