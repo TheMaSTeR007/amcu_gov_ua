@@ -1,0 +1,23 @@
+# Core Scrapy library for web scraping
+scrapy
+
+# Parsing and manipulation libraries
+lxml  # HTML and XML parsing
+unidecode  # ASCII transliteration for Unicode
+
+# Data manipulation and transformation
+pandas  # Data analysis and manipulation
+
+# Utility libraries
+typing-extensions  # For typing hints in Python
+requests  # HTTP requests (if used elsewhere)
+urllib3  # URL handling (if directly needed)
+
+# VPN handling (if evpn is a valid library you are using)
+evpn  # Replace <version> with the correct version
+
+# Additional library Important for translation of Excel Files
+doctor-trans
+
+# Use below command to install above modules
+# pip install -r amcu_gov_ukraine_requirements.txt

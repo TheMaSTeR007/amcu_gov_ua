@@ -1,16 +1,15 @@
-import subprocess
-
-import unicodedata
 from scrapy.cmdline import execute
+from lxml.html import fromstring
 from unidecode import unidecode
 from datetime import datetime
-from lxml.html import fromstring
 from typing import Iterable
 from scrapy import Request
-import pandas as pd
 from urllib import parse
+import pandas as pd
+import unicodedata
+import subprocess
+import logging
 import random
-import string
 import scrapy
 import json
 import time
@@ -28,11 +27,12 @@ def df_cleaner(data_frame: pd.DataFrame) -> pd.DataFrame:
     for column in data_frame.columns:
         data_frame[column] = data_frame[column].apply(set_na)  # Setting "N/A" where data is empty string
         data_frame[column] = data_frame[column].apply(remove_diacritics)  # Remove diacritics characters
-        # data_frame[column] = data_frame[column].apply(remove_extra_spaces)  # Remove extra spaces and newline characters from each column
-        if 'title' in column:
-            data_frame[column] = data_frame[column].str.replace('–', '')  # Remove specific punctuation 'dash' from name string
-            # data_frame[column] = data_frame[column].str.translate(str.maketrans('', '', string.punctuation))  # Removing Punctuation from name text
-            data_frame[column] = data_frame[column].apply(remove_punctuation)  # Removing Punctuation from name text
+
+        # TODO: Not Cleaning 'title' column here as the native text gives different text after translation,
+        #  so sending uncleaned 'title' column as native file first then after translation cleaning the native file and rewriting again.
+        # if 'title' in column:
+        #     data_frame[column] = data_frame[column].str.replace('–', '')  # Remove specific punctuation 'dash' from name string
+        #     data_frame[column] = data_frame[column].apply(remove_punctuation)  # Removing Punctuation from name text
         data_frame[column] = data_frame[column].apply(remove_extra_spaces)  # Remove extra spaces and newline characters from each column
 
     data_frame.replace(to_replace='nan', value=pd.NA, inplace=True)  # After cleaning, replace 'nan' strings back with actual NaN values
@@ -84,9 +84,14 @@ def get_news_time(news_dict: dict) -> str:
     return news_time if news_time != '' else 'N/A'
 
 
+# def get_detail_page_url(news_dict: dict) -> str:
+#     detail_page_url = news_dict.get('url', 'N/A').strip()
+#     return detail_page_url if detail_page_url != '' else 'N/A'
+
 def get_detail_page_url(news_dict: dict) -> str:
-    detail_page_url = news_dict.get('url', 'N/A').strip()
-    return detail_page_url if detail_page_url != '' else 'N/A'
+    detail_page_url = news_dict.get('url', '').strip()
+    normalized_url = detail_page_url.replace(r'\/', '/')  # Replace any escaped slashes to normalize the URL
+    return normalized_url if normalized_url else 'N/A'
 
 
 def get_title(news_dict: dict) -> str:
@@ -110,13 +115,15 @@ def get_desctription(parsed_tree):
 
 
 def get_image_url(parsed_tree):
-    image_url_slugs = parsed_tree.xpath('//p/img/@src')
+    image_url_slugs = parsed_tree.xpath('//p//img/@src')
     image_url = ' | '.join('https://amcu.gov.ua' + url_slug for url_slug in image_url_slugs)
     return image_url if image_url != '' else 'N/A'
 
 
 def get_external_url(parsed_tree):
-    external_url = ' | '.join(parsed_tree.xpath('//p[not(@class)]//a/@href'))
+    external_urls_slugs = parsed_tree.xpath('//p[not(@class)]//a/@href')
+    external_urls_list = ['https://amcu.gov.ua' + url_slug if url_slug.startswith('/') else url_slug for url_slug in external_urls_slugs]
+    external_url = ' | '.join(external_urls_list)
     return external_url if external_url != '' else 'N/A'
 
 
@@ -169,31 +176,36 @@ class AmcuGovUkraineSpider(scrapy.Spider):
 
     def start_requests(self) -> Iterable[Request]:
 
-        cookies = {
-            '_ga_LQTC1RV9HS': 'GS1.1.1734603890.2.0.1734603890.0.0.0',
-            'ak_bmsc': '4060CF4EB31BAB2E31022DEBCF1BC353~000000000000000000000000000000~YAAQjDYQYI7OybqTAQAA1Pd23hr0s5HNNOer80n4fDyyD77gwhC4oClPIG1CUtNvozVvxo9HTjXYclfF54XNbcRc5tOopNGBjRs8d0HY+as7wkzgW5iUDNcZsoJIYyovR9VZ4MXvftZP6e927u1e2rc/HCYg+R/QkrLC8dph/Ki+MMhMGfkQLJocSnCwG5tkV5WdFV/+b+Lo8I7rmBS8YH492FfoJw9Ayupd+jDDIseB34ptpCsP9+CtDetqBIpyCiFAWFlKYVnLWI2qdegM7TWlrUYbKiT7xIRjgxNadUBTgnGhd+V6zWk7kbbVIsUOiPvCS/Hgei+B4mi92UrxzQ5NGjSFJa7XA9AxCKaORWayemiAfcnuGcd/RccKzH4T9j+T7O3/x13PSA==',
-            'amcu_session': 'eyJpdiI6InZYbUVwSitiVWVUTElFZnByZHRqZHc9PSIsInZhbHVlIjoidWduYjhHTlhJYTR4dWE1bk5tNHBzd2hpbTFMQUJXcVJBWGIxNUFFeUJUS2VqWUJmWkhzRU5kTlF2eUErXC9kTDJlWjlKN0trcGRJY3R1bEw0Qng5cU5lVndxVkhNeXVSNzFoV1JQYTRxVzhXQnhKR3ZQQXhWQWVTNzVIV0NGWlRSIiwibWFjIjoiMWFmOGQ3YTY3YzdiOWRjYjgyNmJlMDZmODM3OTQyMTNmODJlMDRhMWI2MzIyYzc5N2E0OGM2YmNhNmRkZTk4ZiJ9',
-            'bm_sv': '2132488AB7FC63A7C195C1DD61EC9903~YAAQjDYQYJngybqTAQAAsSN33hqmlSLF3Ub+RccgGiqxNe1Fl8iGf8erImnCrrIrbTiIscGNiupG6KqzxKbE3gOHB3FCE5iUn2CKFautZKlHO7LTpicwXWVElUX6OZQR5u4ftgQkmTHXbucUAsuHziAPdga+1U+DkqgOgoXlvTn3zNvSBd57GTDkS4NAPBeZAnZqOVUc0zykCD0IeXs/VdzkY0DQdwXkxRUWxqVso6oCtbowGEs29p+rjC+M14hAkw==~1',
-        }
+        # Send CSRF-Token Request
         headers = {
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
-            'content-type': 'application/json',
-            'priority': 'u=1, i',
-            'referer': 'https://amcu.gov.ua/timeline?&type=posts&category_id=2',
+            'sec-ch-ua-platform': '"Windows"',
+            'Referer': 'https://amcu.gov.ua/timeline?&type=posts&category_id=2',
             'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
             'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-origin',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            'x-csrf-token': 'mP3z2X0e1pzP1dUCR0TeHgtj2nPHcMREWoWJBPaA',
+            'X-Requested-With': 'XMLHttpRequest',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept': '*/*',
         }
-        params = {'page': '1', 'type': 'posts', 'category_id': '2', 'lang': 'uk'}
-        url = 'https://amcu.gov.ua/api/timeline'
-        yield scrapy.FormRequest(url=url, method="GET", formdata=params,  # This passes query parameters.
-                                 cookies=cookies, headers=headers, callback=self.parse, meta={'impersonate': random.choice(self.browsers)},
+
+        params = {'page': '1', 'type': 'posts', 'category_id': '2', 'lang': 'uk', }
+        yield scrapy.Request(url='https://amcu.gov.ua/csrf-token', headers=headers, meta={'impersonate': random.choice(self.browsers)},
+                             callback=self.parse_csrf_token, cb_kwargs={'params': params}, dont_filter=True)
+
+    def parse_csrf_token(self, response, **kwargs):
+        csrf_token = response.text.strip('"')
+        # Send Request on Api
+        headers = {
+            'sec-ch-ua-platform': '"Windows"',
+            'X-CSRF-TOKEN': csrf_token,
+            'Referer': 'https://amcu.gov.ua/timeline?&type=posts&category_id=2',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            'Content-Type': 'application/json',
+            'sec-ch-ua-mobile': '?0',
+        }
+        params = kwargs.get('params')
+        yield scrapy.FormRequest(url='https://amcu.gov.ua/api/timeline', method="GET", formdata=params,  # This passes query parameters
+                                 headers=headers, callback=self.parse, meta={'impersonate': random.choice(self.browsers)},
                                  cb_kwargs={'params': params})
 
     def parse(self, response, **kwargs):
@@ -222,7 +234,7 @@ class AmcuGovUkraineSpider(scrapy.Spider):
                     yield scrapy.Request(url=detail_page_url, cookies=self.detail_cookies, headers=self.detail_headers, method='GET', callback=self.detail_page_parse,
                                          dont_filter=True, meta={'impersonate': random.choice(self.browsers)}, cb_kwargs={'params': params, 'data_dict': data_dict})
 
-            # Find the URL of the next page & Handle Pagination
+            # Find the URL of the next page & Hand    le Pagination
             next_page_url = ' '.join(json_dict.get('next_page_url', 'N/A'))
             if next_page_url:
                 print('next_page_url:', next_page_url)
@@ -232,32 +244,19 @@ class AmcuGovUkraineSpider(scrapy.Spider):
                 new_params = params.copy()
                 new_params['page'] = str(page)
 
-                cookies = {
-                    '_ga_LQTC1RV9HS': 'GS1.1.1734603890.2.0.1734603890.0.0.0',
-                    'ak_bmsc': '4060CF4EB31BAB2E31022DEBCF1BC353~000000000000000000000000000000~YAAQjDYQYI7OybqTAQAA1Pd23hr0s5HNNOer80n4fDyyD77gwhC4oClPIG1CUtNvozVvxo9HTjXYclfF54XNbcRc5tOopNGBjRs8d0HY+as7wkzgW5iUDNcZsoJIYyovR9VZ4MXvftZP6e927u1e2rc/HCYg+R/QkrLC8dph/Ki+MMhMGfkQLJocSnCwG5tkV5WdFV/+b+Lo8I7rmBS8YH492FfoJw9Ayupd+jDDIseB34ptpCsP9+CtDetqBIpyCiFAWFlKYVnLWI2qdegM7TWlrUYbKiT7xIRjgxNadUBTgnGhd+V6zWk7kbbVIsUOiPvCS/Hgei+B4mi92UrxzQ5NGjSFJa7XA9AxCKaORWayemiAfcnuGcd/RccKzH4T9j+T7O3/x13PSA==',
-                    'amcu_session': 'eyJpdiI6InZYbUVwSitiVWVUTElFZnByZHRqZHc9PSIsInZhbHVlIjoidWduYjhHTlhJYTR4dWE1bk5tNHBzd2hpbTFMQUJXcVJBWGIxNUFFeUJUS2VqWUJmWkhzRU5kTlF2eUErXC9kTDJlWjlKN0trcGRJY3R1bEw0Qng5cU5lVndxVkhNeXVSNzFoV1JQYTRxVzhXQnhKR3ZQQXhWQWVTNzVIV0NGWlRSIiwibWFjIjoiMWFmOGQ3YTY3YzdiOWRjYjgyNmJlMDZmODM3OTQyMTNmODJlMDRhMWI2MzIyYzc5N2E0OGM2YmNhNmRkZTk4ZiJ9',
-                    'bm_sv': '2132488AB7FC63A7C195C1DD61EC9903~YAAQjDYQYJngybqTAQAAsSN33hqmlSLF3Ub+RccgGiqxNe1Fl8iGf8erImnCrrIrbTiIscGNiupG6KqzxKbE3gOHB3FCE5iUn2CKFautZKlHO7LTpicwXWVElUX6OZQR5u4ftgQkmTHXbucUAsuHziAPdga+1U+DkqgOgoXlvTn3zNvSBd57GTDkS4NAPBeZAnZqOVUc0zykCD0IeXs/VdzkY0DQdwXkxRUWxqVso6oCtbowGEs29p+rjC+M14hAkw==~1',
-                }
+                print('Sending request on next page', page)
+                # Send CSRF-Token Request
                 headers = {
-                    'accept': '*/*',
-                    'accept-language': 'en-US,en;q=0.9',
-                    'content-type': 'application/json',
-                    'priority': 'u=1, i',
-                    'referer': 'https://amcu.gov.ua/timeline?&type=posts&category_id=2',
+                    'sec-ch-ua-platform': '"Windows"',
+                    'Referer': 'https://amcu.gov.ua/timeline?&type=posts&category_id=2',
                     'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
                     'sec-ch-ua-mobile': '?0',
-                    'sec-ch-ua-platform': '"Windows"',
-                    'sec-fetch-dest': 'empty',
-                    'sec-fetch-mode': 'cors',
-                    'sec-fetch-site': 'same-origin',
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                    'x-csrf-token': 'mP3z2X0e1pzP1dUCR0TeHgtj2nPHcMREWoWJBPaA',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                    'Accept': '*/*',
                 }
-
-                print('Sending request on next page', page)
-                yield scrapy.FormRequest(url='https://amcu.gov.ua/api/timeline', method="GET", formdata=new_params,  # This passes query parameters.
-                                         cookies=cookies, headers=headers, callback=self.parse, meta={'impersonate': random.choice(self.browsers)},
-                                         cb_kwargs={'params': new_params})
+                yield scrapy.Request(url='https://amcu.gov.ua/csrf-token', headers=headers, meta={'impersonate': random.choice(self.browsers)},
+                                     callback=self.parse_csrf_token, cb_kwargs={'params': new_params}, dont_filter=True)
             else:
                 print(f'No More Pagination found after {params['page']}')
             print('+' * 100)
@@ -270,7 +269,7 @@ class AmcuGovUkraineSpider(scrapy.Spider):
         parsed_tree = fromstring(response.text)  # Parse the HTML
 
         # Extract your data here...
-        print("Extracting Detail data from page:", params['page'])
+        self.log(message=f"Extracting Detail data (desctription, image_url, external_url) from {data_dict['detail_page_url']}", level=logging.INFO)
         data_dict['description'] = get_desctription(parsed_tree)
         data_dict['image_url'] = get_image_url(parsed_tree)
         data_dict['external_url'] = get_external_url(parsed_tree)
@@ -278,30 +277,33 @@ class AmcuGovUkraineSpider(scrapy.Spider):
         self.final_data_list.append(data_dict)
 
     def close(self, reason):
-        print('closing spider...')
+        self.log(message='closing spider...', level=logging.INFO)
         if self.final_data_list:
             try:
-                print("Creating Native sheet...")
+                self.log(message="Creating Native sheet...", level=logging.INFO)
                 native_data_df = pd.DataFrame(self.final_data_list)
                 native_data_df = df_cleaner(data_frame=native_data_df)  # Apply the function to all columns for Cleaning
                 native_data_df.insert(loc=0, column='id', value=range(1, len(native_data_df) + 1))  # Add 'id' column at position 1
                 with pd.ExcelWriter(path=self.filename_native, engine='xlsxwriter', engine_kwargs={"options": {'strings_to_urls': False}}) as writer:
                     native_data_df.to_excel(excel_writer=writer, index=False)
-                print("Native Excel file Successfully created.")
+                self.log(message="Native Excel file Successfully created.", level=logging.INFO)
             except Exception as e:
-                print('Error while Generating Native Excel file:', e)
+                self.log(message=f'Error while Generating Native Excel file: {e}', level=logging.INFO)
 
             # Run the translation script with filenames passed as arguments
             try:
+                # TODO: Define the filenames as arguments with source language code
+                #   [COMPULSORILY pass Source Language as by-default trans function will take 'auto' as Source Language and
+                #   will provide incorrect translation as desired.]
                 subprocess.run(
-                    args=["python", "translate_and_save.py", self.filename_native, self.filename_translated],  # Define the filenames as arguments
+                    args=["python", "translate_and_save.py", self.filename_native, self.filename_translated, 'uk'],
                     check=True
                 )
                 print("Translation completed successfully.")
             except subprocess.CalledProcessError as e:
                 print(f"Error during translation: {e}")
         else:
-            print('Final-Data-List is empty.')
+            print('Final-Data-List is empty, Hence not generating Excel File.')
         if self.api.is_connected:  # Disconnecting VPN if it's still connected
             self.api.disconnect()
         end = time.time()
